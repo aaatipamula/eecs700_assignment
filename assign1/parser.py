@@ -7,6 +7,8 @@ def py_ast(filename):
         return tree
 
 class WhilePyVisitor(ast.NodeVisitor):
+    procs = {}
+
     def visit_Module(self, node):
         nodes = list(map(self.visit, node.body))
         return ['seq'] + nodes
@@ -25,6 +27,14 @@ class WhilePyVisitor(ast.NodeVisitor):
             elif node.func.id == 'invariant':
                 assert len(node.args) == 1
                 return ['invariant', self.visit(node.args[0])]
+            elif node.func.id == 'old':
+                assert len(node.args) == 1
+                var = self.visit(node.args[0])
+                var[1] = f"old_{var[1]}"
+                return var
+            else:
+                args = list(map(self.visit, node.args))
+                return ['call', node.func.id, args, '_']
         raise NotImplementedError(ast.dump(node))
     
     def visit_Const(self, node):
@@ -89,10 +99,21 @@ class WhilePyVisitor(ast.NodeVisitor):
     def visit_Assign(self, node):
         assert len(node.targets) == 1
         target = node.targets[0]
-        assert isinstance(target, ast.Name)
-        var = target.id
         value = self.visit(node.value)
-        return ['assign', var, value]
+
+        if isinstance(value, list) and value[0] == 'call':
+            assert isinstance(target, ast.Name)
+            value[-1] = target.id
+            return value
+        elif isinstance(target, ast.Name):
+            var = target.id
+            return ['assign', var, value]
+        elif isinstance(target, ast.Subscript):
+            array = self.visit(target.value)
+            index = self.visit(target.slice)
+            return ['tastore', array[1], index, value]
+        else:
+            raise NotImplementedError(ast.dump(target))
     
     def visit_Pass(self, node):
         return ['skip']
@@ -113,6 +134,50 @@ class WhilePyVisitor(ast.NodeVisitor):
                     inv = self.visit(call.args[0])
                     invariants.append(inv)
         return ['while', test, body, invariants]
+
+    def visit_Subscript(self, node):
+        array = self.visit(node.value)
+        index = self.visit(node.slice)
+        return ['select', array[1], index]
+
+    def visit_FunctionDef(self, node):
+        params = list(map(self.visit, node.args.args))
+        req = None
+        ensures = None
+        body = []
+        modifies = []
+        for stmt in node.body:
+            if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call):
+                call = stmt.value
+                if isinstance(call.func, ast.Name) and call.func.id == 'requires':
+                    assert len(call.args) == 1
+                    req = self.visit(call.args[0])
+                    continue
+                elif isinstance(call.func, ast.Name) and call.func.id == 'ensures':
+                    assert len(call.args) == 1
+                    ensures = self.visit(call.args[0])
+                    continue
+
+            if isinstance(stmt, ast.Assign):
+                assign = self.visit(stmt)
+                if assign[0] != 'tastore':
+                    modifies.append(assign[1])
+                continue
+
+            stmt_node = self.visit(stmt)
+            body.append(stmt_node)
+
+        assert req is not None and ensures is not None # All functions should have an ensure and requires
+        self.procs[node.name] = [params, body, req, ensures, modifies]
+        return ['proc', node.name, params, body, req, ensures, modifies]
+
+    def visit_arg(self, node):
+        return node.arg
+
+    def visit_Return(self, node):
+        assert node.value is not None
+        expr = self.visit(node.value)
+        return ['return', expr]
     
     def generic_visit(self, node):
         raise NotImplementedError(ast.dump(node))
