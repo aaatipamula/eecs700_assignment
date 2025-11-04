@@ -162,7 +162,6 @@ class WhilePyVisitor(ast.NodeVisitor):
                 assign = self.visit(stmt)
                 if assign[0] != 'tastore':
                     modifies.append(assign[1])
-                continue
 
             stmt_node = self.visit(stmt)
             body.append(stmt_node)

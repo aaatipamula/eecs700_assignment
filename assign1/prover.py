@@ -60,7 +60,6 @@ def wp(stmt, post, proc_env: dict):
         wp_body = wp(['seq'] + body, ensures, proc_env)
 
         return Implies(requires, wp_body)
-        # return post
 
     elif stmt[0] == 'return':
         replaced = ['assign', 'ret', stmt[1]]
