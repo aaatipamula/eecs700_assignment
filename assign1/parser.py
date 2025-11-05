@@ -172,8 +172,10 @@ class WhilePyVisitor(ast.NodeVisitor):
 
             if isinstance(stmt, ast.Assign):
                 assign = self.visit(stmt)
-                if assign[0] != 'tastore':
+                if assign[0] == 'assign':
                     modifies.append(assign[1])
+                if assign[0] == 'call':
+                    modifies.append(assign[-1])
 
             stmt_node = self.visit(stmt)
             body.append(stmt_node)

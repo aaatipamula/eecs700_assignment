@@ -84,19 +84,7 @@ def wp(stmt, post, proc_env: dict, curr_proc):
 
         if curr_proc == name:
             # recursive call: assume the function's own contract
-            req = expr_to_z3(req)
-            ens = expr_to_z3(ens)
-            pairs = [(Int(p), expr_to_z3(a)) for p, a in zip(params, actuals)]
-            req = substitute(req, *pairs)
-            ens = substitute(ens, *pairs)
-            ens = substitute(ens, (Int('ret'), Int(lhs)))
-
-            # frame for old vars (params only)
-            old_vars = find_old_vars(ens)
-            frame = And(*[Int(f"{v}_old") == expr_to_z3(a)
-                          for v, a in zip(params, actuals)
-                          if v in old_vars])
-            return And(Implies(req, And(ens, frame)), post)
+            return And(ensures, post)
 
         # VC2 (Havoc step)
         havoc_list = havoc(modifies)
