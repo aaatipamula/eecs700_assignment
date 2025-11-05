@@ -81,6 +81,18 @@ class WhilePyVisitor(ast.NodeVisitor):
         assert isinstance(node.op, ast.USub)
         operand = self.visit(node.operand)
         return ['-', operand]
+
+    def visit_BoolOp(self, node):
+        assert len(node.values) == 2
+        left = self.visit(node.values[0])
+        right = self.visit(node.values[1])
+
+        if isinstance(node.op, ast.Or):
+            return ['or', left, right]
+        elif isinstance(node.op, ast.And):
+            return ['and', left, right]
+        else:
+            raise NotImplementedError(ast.dump(node))
     
     def visit_BinOp(self, node):
         left = self.visit(node.left)

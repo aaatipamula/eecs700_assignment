@@ -1,12 +1,10 @@
 from pprint import pprint
 from z3 import *
 
-_counter = 0
-
-def wp(stmt, post, proc_env: dict):
+def wp(stmt, post, proc_env: dict, curr_proc):
     if stmt[0] == 'seq':
         for s in reversed(stmt[1:]):
-            post = wp(s, post, proc_env)
+            post = wp(s, post, proc_env, curr_proc)
         return post
     elif stmt[0] == 'assume':
         cond = expr_to_z3(stmt[1])
@@ -18,8 +16,8 @@ def wp(stmt, post, proc_env: dict):
         test = expr_to_z3(stmt[1])
         body = stmt[2]
         orelse = stmt[3]
-        wp_body = wp(['seq'] + body, post, proc_env)
-        wp_orelse = wp(['seq'] + orelse, post, proc_env)
+        wp_body = wp(['seq'] + body, post, proc_env, curr_proc)
+        wp_orelse = wp(['seq'] + orelse, post, proc_env, curr_proc)
         return And(Implies(test, wp_body), Implies(Not(test), wp_orelse))
     elif stmt[0] == 'skip':
         return post
@@ -44,7 +42,7 @@ def wp(stmt, post, proc_env: dict):
         cond = expr_to_z3(stmt[1])
         invariant = And(*list(map(expr_to_z3, stmt[3])))
         body = stmt[2]
-        wp_body = wp(['seq'] + body, invariant, proc_env)
+        wp_body = wp(['seq'] + body, invariant, proc_env, curr_proc)
         return And(invariant, Implies(And(invariant, cond), wp_body), Implies(And(invariant, Not(cond)), post))
 
     elif stmt[0] == 'proc':
@@ -57,13 +55,13 @@ def wp(stmt, post, proc_env: dict):
         for v in old_vars:
             requires = And(requires, Int(f"{v}_old") == Int(v))
 
-        wp_body = wp(['seq'] + body, ensures, proc_env)
+        wp_body = wp(['seq'] + body, ensures, proc_env, name)
 
         return Implies(requires, wp_body)
 
     elif stmt[0] == 'return':
         replaced = ['assign', 'ret', stmt[1]]
-        return wp(replaced, post, proc_env)
+        return wp(replaced, post, proc_env, curr_proc)
 
     elif stmt[0] == 'call':
         name, actuals, lhs = stmt[1:]
@@ -84,11 +82,26 @@ def wp(stmt, post, proc_env: dict):
                 frame_pairs.append(Int(f"{var}_old") == Int(var))
         frame_condition = And(*frame_pairs) if frame_pairs else BoolVal(True)
 
+        if curr_proc == name:
+            # recursive call: assume the function's own contract
+            req = expr_to_z3(req)
+            ens = expr_to_z3(ens)
+            pairs = [(Int(p), expr_to_z3(a)) for p, a in zip(params, actuals)]
+            req = substitute(req, *pairs)
+            ens = substitute(ens, *pairs)
+            ens = substitute(ens, (Int('ret'), Int(lhs)))
+
+            # frame for old vars (params only)
+            old_vars = find_old_vars(ens)
+            frame = And(*[Int(f"{v}_old") == expr_to_z3(a)
+                          for v, a in zip(params, actuals)
+                          if v in old_vars])
+            return And(Implies(req, And(ens, frame)), post)
+
         # VC2 (Havoc step)
         havoc_list = havoc(modifies)
         post = substitute(post, *havoc_list)
 
-        # return And(Implies(requires, ensures), post)
         return And(Implies(requires, And(ensures, frame_condition)), post)
     
     else:
@@ -141,6 +154,10 @@ def expr_to_z3(expr):
         return expr_to_z3(expr[1]) / expr_to_z3(expr[2])
     elif expr[0] == '==':
         return expr_to_z3(expr[1]) == expr_to_z3(expr[2])
+    elif expr[0] == 'and':
+        return And(expr_to_z3(expr[1]), expr_to_z3(expr[2]))
+    elif expr[0] == 'or':
+        return Or(expr_to_z3(expr[1]), expr_to_z3(expr[2]))
     elif expr[0] == 'select':
         arr = Array(expr[1], IntSort(), IntSort())
         return Select(arr, expr_to_z3(expr[2]))
@@ -149,7 +166,7 @@ def expr_to_z3(expr):
 
 def prove(stmt, proc_env):
     post = BoolVal(True)
-    pre = wp(stmt, post, proc_env)
+    pre = wp(stmt, post, proc_env, "")
     print(pre)
     s = Solver()
     s.add(Not(pre))
