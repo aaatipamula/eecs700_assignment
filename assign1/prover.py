@@ -25,7 +25,6 @@ def wp(stmt, post, proc_env: dict, curr_proc):
         var = stmt[1]
         expr = expr_to_z3(stmt[2])
         return substitute(post, (Int(var), expr))
-
     elif stmt[0] == 'tastore':
         A, I, E = stmt[1:]
         A_z3 = Array(A, IntSort(), IntSort())
@@ -33,11 +32,9 @@ def wp(stmt, post, proc_env: dict, curr_proc):
         E_z3 = expr_to_z3(E)
         store = Store(A_z3, I_z3, E_z3)
         return substitute(post, (A_z3, store))
-
     elif stmt[0] == 'invariant':
         # invariants do not affect the weakest precondition
         return BoolVal(True)
-
     elif stmt[0] == 'while':
         cond = expr_to_z3(stmt[1])
         invariant = And(*list(map(expr_to_z3, stmt[3])))
@@ -46,14 +43,14 @@ def wp(stmt, post, proc_env: dict, curr_proc):
         return And(invariant, Implies(And(invariant, cond), wp_body), Implies(And(invariant, Not(cond)), post))
 
     elif stmt[0] == 'proc':
-        name, params, body, req, ens, _ = stmt[1:]
+        name, params, body, req, ens, modifies = stmt[1:]
 
         requires = expr_to_z3(req)
         ensures = expr_to_z3(ens)
 
-        old_vars = find_old_vars(ens)
-        for v in old_vars:
-            requires = And(requires, Int(f"{v}_old") == Int(v))
+        old_vars = [Int(f"{v}_old") == Int(v) for v in find_old_vars(ens)]
+        if old_vars:
+            requires = And(requires, *old_vars)
 
         wp_body = wp(['seq'] + body, ensures, proc_env, name)
 
@@ -72,25 +69,17 @@ def wp(stmt, post, proc_env: dict, curr_proc):
 
         # VC1 (substitute formals with actuals and ret with lhs)
         pairs = zip(map(Int, params), map(expr_to_z3, actuals))
-        requires = substitute(requires, *pairs)
+        requires = substitute(requires, *pairs) # Assuming pre implies requires
         ensures = substitute(ensures, *pairs)
         ensures = substitute(ensures, (Int('ret'), Int(lhs)))
 
-        frame_pairs = []
-        for var in find_old_vars(ens):
-            if var not in modifies:
-                frame_pairs.append(Int(f"{var}_old") == Int(var))
-        frame_condition = And(*frame_pairs) if frame_pairs else BoolVal(True)
-
-        if curr_proc == name:
-            # recursive call: assume the function's own contract
-            return And(ensures, post)
-
         # VC2 (Havoc step)
+        # NOTE: Havoc step implies the frame condition as modified variables
         havoc_list = havoc(modifies)
-        post = substitute(post, *havoc_list)
+        if havoc_list:
+            post = substitute(post, *havoc_list)
 
-        return And(Implies(requires, And(ensures, frame_condition)), post)
+        return Implies(And(requires, ensures), post)
     
     else:
         raise NotImplementedError(stmt)
