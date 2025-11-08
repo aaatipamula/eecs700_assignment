@@ -30,7 +30,7 @@ class WhilePyVisitor(ast.NodeVisitor):
             elif node.func.id == 'old':
                 assert len(node.args) == 1
                 var = self.visit(node.args[0])
-                var[1] = f"old_{var[1]}"
+                var[1] = f"{var[1]}_old"
                 return var
             else:
                 args = list(map(self.visit, node.args))
@@ -174,8 +174,10 @@ class WhilePyVisitor(ast.NodeVisitor):
                 assign = self.visit(stmt)
                 if assign[0] == 'assign':
                     modifies.append(assign[1])
-                if assign[0] == 'call':
+                elif assign[0] == 'call':
                     modifies.append(assign[-1])
+                elif assign[0] == 'tastore':  # Array write
+                    modifies.append(assign[1])  # array name
 
             stmt_node = self.visit(stmt)
             body.append(stmt_node)
