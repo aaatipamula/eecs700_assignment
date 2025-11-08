@@ -2,8 +2,10 @@
 
 set -e
 
+PYTHON_BIN="uv run"
+
 for f in tests/*.py; do
   echo "=== Testing on $f ==="
-  uv run prover.py $f
+  $PYTHON_BIN prover.py $f
   echo
 done

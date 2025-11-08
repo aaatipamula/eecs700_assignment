@@ -1,10 +1,10 @@
 from pprint import pprint
 from z3 import *
 
-def wp(stmt, post, proc_env: dict, curr_proc):
+def wp(stmt, post, proc_env: dict):
     if stmt[0] == 'seq':
         for s in reversed(stmt[1:]):
-            post = wp(s, post, proc_env, curr_proc)
+            post = wp(s, post, proc_env)
         return post
     elif stmt[0] == 'assume':
         cond = expr_to_z3(stmt[1])
@@ -16,8 +16,8 @@ def wp(stmt, post, proc_env: dict, curr_proc):
         test = expr_to_z3(stmt[1])
         body = stmt[2]
         orelse = stmt[3]
-        wp_body = wp(['seq'] + body, post, proc_env, curr_proc)
-        wp_orelse = wp(['seq'] + orelse, post, proc_env, curr_proc)
+        wp_body = wp(['seq'] + body, post, proc_env)
+        wp_orelse = wp(['seq'] + orelse, post, proc_env)
         return And(Implies(test, wp_body), Implies(Not(test), wp_orelse))
     elif stmt[0] == 'skip':
         return post
@@ -39,7 +39,7 @@ def wp(stmt, post, proc_env: dict, curr_proc):
         cond = expr_to_z3(stmt[1])
         invariant = And(*list(map(expr_to_z3, stmt[3])))
         body = stmt[2]
-        wp_body = wp(['seq'] + body, invariant, proc_env, curr_proc)
+        wp_body = wp(['seq'] + body, invariant, proc_env)
         return And(invariant, Implies(And(invariant, cond), wp_body), Implies(And(invariant, Not(cond)), post))
 
     elif stmt[0] == 'proc':
@@ -52,13 +52,13 @@ def wp(stmt, post, proc_env: dict, curr_proc):
         if old_vars:
             requires = And(requires, *old_vars)
 
-        wp_body = wp(['seq'] + body, ensures, proc_env, name)
+        wp_body = wp(['seq'] + body, ensures, proc_env)
 
         return Implies(requires, wp_body)
 
     elif stmt[0] == 'return':
         replaced = ['assign', 'ret', stmt[1]]
-        return wp(replaced, post, proc_env, curr_proc)
+        return wp(replaced, post, proc_env)
 
     elif stmt[0] == 'call':
         name, actuals, lhs = stmt[1:]
@@ -79,20 +79,19 @@ def wp(stmt, post, proc_env: dict, curr_proc):
         if havoc_list:
             post = substitute(post, *havoc_list)
 
-        return Implies(And(requires, ensures), post)
+        return And(requires, Implies(ensures, post))
     
     else:
         raise NotImplementedError(stmt)
 
 def find_old_vars(expr):
-    """Collect variable names appearing as x_old in an AST."""
     result = set()
     if isinstance(expr, list):
         if expr[0] == 'var' and expr[1].endswith('_old'):
             result.add(expr[1][:-4])  # strip '_old'
         else:
             for e in expr[1:]:
-                result |= find_old_vars(e)
+                result.union(find_old_vars(e))
     return result
 
 def havoc(modifies: list[str]) -> list[tuple[ArithRef, ArithRef]]:
@@ -143,7 +142,7 @@ def expr_to_z3(expr):
 
 def prove(stmt, proc_env):
     post = BoolVal(True)
-    pre = wp(stmt, post, proc_env, "")
+    pre = wp(stmt, post, proc_env)
     print(pre)
     s = Solver()
     s.add(Not(pre))

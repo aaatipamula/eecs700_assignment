@@ -29,6 +29,7 @@ class WhilePyVisitor(ast.NodeVisitor):
                 return ['invariant', self.visit(node.args[0])]
             elif node.func.id == 'old':
                 assert len(node.args) == 1
+                assert isinstance(node.args[0], ast.Name)
                 var = self.visit(node.args[0])
                 var[1] = f"{var[1]}_old"
                 return var
